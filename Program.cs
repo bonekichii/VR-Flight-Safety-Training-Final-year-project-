@@ -13,8 +13,8 @@ class Program
 {
     static AppState currentState = AppState.Welcome;
     static Model? airplane = null;
-    static Pose quizScreenPose = new Pose(new Vec3(0, 0.2f, -4.0f), Quat.FromAngles(0, 180, 0));
-    static Pose quizUiPose = new Pose(new Vec3(0, 0.2f, -2.05f), Quat.LookDir(0, 0, 1));
+    static Pose quizScreenPose = new Pose(new Vec3(0, -0.8f, -4.0f), Quat.FromAngles(0, 180, 0));
+    static Pose quizUiPose = new Pose(new Vec3(0, -0.8f, -2.05f), Quat.LookDir(0, 0, 1));
     static Vec3 quizScreenScale = new Vec3(0.9f, 0.55f, 0.04f);
     static Vec3 targetSeatPosition = new Vec3(0.5f, -1.0f, -4.5f);
 
@@ -33,7 +33,7 @@ class Program
     static bool videoPlaying = false;
     static float videoTimer = 0f;
     static float videoFPS = 30f;
-    static Pose videoScreenPose = new Pose(new Vec3(0, 0.2f, -2.0f), Quat.LookDir(0, 0, 1));
+    static Pose videoScreenPose = new Pose(new Vec3(0, -0.8f, -2.0f), Quat.LookDir(0, 0, 1));
     static Vec3 videoScreenScale = new Vec3(0.8f, 0.45f, 0.02f);
     static IWavePlayer? audioPlayer = null;
     static AudioFileReader? audioFile = null;
@@ -500,7 +500,7 @@ class Program
         }
 
         // Show briefing UI
-        Pose briefPose = new Pose(new Vec3(0, 0.2f, -2.0f), Quat.LookDir(0, 0, 1));
+        Pose briefPose = new Pose(new Vec3(0, -0.8f, -2.0f), Quat.LookDir(0, 0, 1));
         UI.WindowBegin("Emergency Drill", ref briefPose, new Vec2(55, 35) * U.cm);
 
         UI.PushTint(new Color(1f, 0.2f, 0.2f));
@@ -750,4 +750,4 @@ class Program
             {
                 var caps = WaveOut.GetCapabilities(i);
                 string name = caps.ProductName.ToLower();
-                if (name.Cont
+                if (name.
