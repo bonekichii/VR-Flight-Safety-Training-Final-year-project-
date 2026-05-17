@@ -1,0 +1,12 @@
+Place your Emirates safety video here.
+
+Video name: emirates_safety.mp4
+
+Download from: https://www.youtube.com/watch?v=gFP5VLve3t4
+(Use youtube-dl or similar tool)
+
+For quick setup:
+1. Download the video
+2. Rename to: emirates_safety.mp4
+3. Place in this Assets folder
+4. The app will launch it in external player

@@ -1,0 +1,32 @@
+\chapter{Software Requirements and Specification}
+
+\section{Functional Requirements}
+\begin{itemize}
+    \item \textbf{FR1 - Environment Rendering:} The system shall render a realistic 3D model of a Boeing 737-800 cabin.
+    \item \textbf{FR2 - User Movement:} The system shall allow the user to move within the cabin using VR controllers or keyboard input (WASD).
+    \item \textbf{FR3 - Video Playback:} The system shall play a safety video on a virtual screen with synchronized audio.
+    \item \textbf{FR4 - Quiz System:} The system shall present a 12-question quiz to the user.
+    \item \textbf{FR5 - Scoring:} The system shall calculate and display the user's score upon completion of the quiz.
+    \item \textbf{FR6 - Audio Feedback:} The system shall provide audio feedback (TTS) and background music.
+\end{itemize}
+
+\section{Non-Functional Requirements}
+\begin{itemize}
+    \item \textbf{NFR1 - Performance:} The application must maintain a minimum frame rate of 72 FPS on the Meta Quest 3 to prevent motion sickness.
+    \item \textbf{NFR2 - Usability:} The UI must be intuitive and legible within the VR environment.
+    \item \textbf{NFR3 - Reliability:} The system should not crash during standard operation.
+\end{itemize}
+
+\section{Hardware Requirements}
+\begin{itemize}
+    \item \textbf{Development PC:} Windows 10/11, Intel Core i5 or better, NVIDIA GTX 1060 or better.
+    \item \textbf{Target Device:} Meta Quest 3 (Standalone or Link).
+\end{itemize}
+
+\section{Software Requirements}
+\begin{itemize}
+    \item \textbf{Operating System:} Windows 10/11.
+    \item \textbf{IDE:} Visual Studio 2022.
+    \item \textbf{Framework:} StereoKit (NuGet package).
+    \item \textbf{Libraries:} OpenCvSharp (Video), NAudio (Audio), System.Speech (TTS).
+\end{itemize}

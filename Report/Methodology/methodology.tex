@@ -1,0 +1,30 @@
+\chapter{Proposed Methodology}
+
+\section{Development Approach}
+This project follows an iterative development approach, utilizing the \textbf{StereoKit} framework. Unlike traditional game engines (Unity/Unreal) that rely heavily on visual editors, StereoKit uses a "Code-First" paradigm. This allows for:
+\begin{itemize}
+    \item \textbf{Rapid Prototyping:} Changes are made directly in code, reducing context switching.
+    \item \textbf{Version Control:} The entire project is code-based, making it Git-friendly.
+    \item \textbf{Performance Optimization:} Direct access to the rendering loop allows for fine-tuned performance.
+\end{itemize}
+
+\section{Immediate Mode GUI (IMGUI)}
+The user interface is built using the Immediate Mode pattern. In this paradigm, the UI is drawn and processed in the same pass. For example, a button is rendered and its click state is checked in a single line of code:
+\begin{verbatim}
+if (UI.Button("Start")) {
+    // Handle click
+}
+\end{verbatim}
+This simplifies state management and reduces the complexity of event handling.
+
+\section{Custom Video Engine}
+To ensure high performance and compatibility, a custom video player was implemented using \textbf{OpenCvSharp}.
+\begin{enumerate}
+    \item \textbf{Initialization:} The video file is opened using \texttt{VideoCapture}.
+    \item \textbf{Frame Extraction:} Each frame, the system checks if it's time to update based on the video's FPS.
+    \item \textbf{Rendering:} The frame is converted to a texture and applied to a quad mesh in the VR scene.
+    \item \textbf{Audio Sync:} \textbf{NAudio} is used to play the audio track, synchronized with the video start time.
+\end{enumerate}
+
+\section{Procedural Audio Generation}
+Background music is generated procedurally at runtime using mathematical wave functions (Sine waves). This eliminates the need for large audio files and allows for dynamic soundscapes that never repeat exactly.

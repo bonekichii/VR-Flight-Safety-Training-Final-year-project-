@@ -1,0 +1,109 @@
+// Add this to replace the ShowQuizUI function
+
+// Quiz system - 15 safety scenario questions
+static int currentQuestionIndex = 0;
+static int score = 0;
+static List<(string scenario, string question, string[] options, int correct)> quizData = new List<(string, string, string[], int)>
+{
+    ("During takeoff", "Should your seatbelt be LOW and TIGHT?", new[] { "YES", "NO" }, 0),
+    ("Emergency evacuation", "Should you take luggage?", new[] { "YES", "NO" }, 1),
+    ("Oxygen mask", "Secure YOUR mask first?", new[] { "YES", "NO" }, 0),
+    ("Life vest", "Inflate INSIDE aircraft?", new[] { "YES", "NO" }, 1),
+    ("Emergency exit", "Follow floor lighting?", new[] { "YES", "NO" }, 0),
+    ("Emergency landing", "Adopt brace position?", new[] { "YES", "NO" }, 0),
+    ("Smoking", "Allowed in lavatories?", new[] { "YES", "NO" }, 1),
+    ("Seatback", "Upright during takeoff?", new[] { "YES", "NO" }, 0),
+    ("Tray table", "Stowed during landing?", new[] { "YES", "NO" }, 0),
+    ("Electronics", "Stow large devices?", new[] { "YES", "NO" }, 0),
+    ("Nearest exit", "Locate before takeoff?", new[] { "YES", "NO" }, 0),
+    ("Pressure loss", "Masks deploy automatically?", new[] { "YES", "NO" }, 0),
+    ("Emergency slide", "Remove high heels?", new[] { "YES", "NO" }, 0),
+    ("Water landing", "Inflate vest outside?", new[] { "YES", "NO" }, 0),
+    ("Crew instructions", "Follow in emergency?", new[] { "YES", "NO" }, 0)
+};
+
+static void ShowQuizUI(Sprite screenSprite)
+{
+    Vec3 screenPos = new Vec3(0, -1.3f, -3);
+    Quat screenRot = Quat.FromAngles(0, 180, 0);
+    
+    // Background
+    Mesh.Quad.Draw(Material.Default, Matrix.TRS(screenPos, screenRot, new Vec3(1.0f, 0.6f, 0.05f)), new Color(0.1f, 0.1f, 0.2f));
+    
+    if (currentQuestionIndex < quizData.Count)
+    {
+        var q = quizData[currentQuestionIndex];
+        
+        // Header
+        Text.Add($"Q {currentQuestionIndex + 1}/15", 
+                 Matrix.TRS(screenPos + new Vec3(0, 0.35f, 0.05f), screenRot, 0.6f), 
+                 TextAlign.Center);
+        
+        // Scenario
+        Text.Add(q.scenario, 
+                 Matrix.TRS(screenPos + new Vec3(0, 0.22f, 0.05f), screenRot, 0.7f), 
+                 TextAlign.Center);
+        
+        // Question
+        Text.Add(q.question, 
+                 Matrix.TRS(screenPos + new Vec3(0, 0.05f, 0.05f), screenRot, 0.65f), 
+                 TextAlign.Center);
+        
+        // Buttons
+        Pose buttonPose = new Pose(screenPos + new Vec3(0, -0.15f, 0.06f), screenRot);
+        UI.WindowBegin("", ref buttonPose, new Vec2(40, 12) * U.cm, UIWin.Body);
+        
+        if (UI.Button(q.options[0]))
+        {
+            if (0 == q.correct) score++;
+            currentQuestionIndex++;
+        }
+        UI.SameLine();
+        if (UI.Button(q.options[1]))
+        {
+            if (1 == q.correct) score++;
+            current QuestionIndex++;
+        }
+        
+        UI.WindowEnd();
+        
+        // Score
+        Text.Add($"Score: {score}/{currentQuestionIndex}", 
+                 Matrix.TRS(screenPos + new Vec3(0, -0.35f, 0.05f), screenRot, 0.5f), 
+                 TextAlign.Center);
+    }
+    else
+    {
+        // Results
+        float percent = (score / 15f) * 100;
+       
+        Text.Add("QUIZ COMPLETE!", 
+                 Matrix.TRS(screenPos + new Vec3(0, 0.25f, 0.05f), screenRot, 1.0f), 
+                 TextAlign.Center);
+        
+        Text.Add($"{score}/15  ({percent:F0}%)", 
+                 Matrix.TRS(screenPos + new Vec3(0, 0.05f, 0.05f), screenRot, 0.9f), 
+                 TextAlign.Center);
+        
+        string grade = percent >= 90 ? "Excellent!" : 
+                      percent >= 75 ? "Good!" : 
+                      percent >= 60 ? "Pass" : "Review Needed";
+        
+        Text.Add(grade, 
+                 Matrix.TRS(screenPos + new Vec3(0, -0.15f, 0.05f), screenRot, 0.8f), 
+                 TextAlign.Center);
+        
+        // Restart
+        Pose resetPose = new Pose(screenPos + new Vec3(0, -0.35f, 0.06f), screenRot);
+        UI.WindowBegin("", ref resetPose, new Vec2(25, 8) * U.cm, UIWin.Body);
+        
+        if (UI.Button("Restart"))
+        {
+            currentQuestionIndex = 0;
+            score = 0;
+            currentState = AppState.Welcome;
+        }
+        
+        UI.WindowEnd();
+    }
+}
