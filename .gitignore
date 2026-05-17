@@ -1,2 +1,8 @@
 .git_broken/
 .vs/
+bin/
+obj/
+*.user
+*.suo
+*.zip
+*.docx

@@ -61,15 +61,12 @@ An immersive **Meta Quest** training experience built with **StereoKit** and **.
 
 ```
 SafetyDemo/
-├── Program.cs              # Main app: states, rendering, audio, quiz, emergency drill
-├── SafetyDemo.csproj       # Dependencies and build config
-├── Assets/
-│   ├── airplane.glb        # Cabin 3D model
-│   ├── *.mp4               # Safety briefing video
-│   └── *.png               # UI textures
-├── Report/                 # LaTeX project report sources
-├── PROJECT_HANDOVER.md     # Architecture notes
-└── VR_DEPLOYMENT_GUIDE.md  # Quest Link deployment details
+├── Program.cs         # App logic: states, audio, quiz, emergency drill
+├── SafetyDemo.csproj  # Dependencies and build config
+└── Assets/
+    ├── airplane.glb   # Cabin 3D model
+    ├── *.mp4          # Safety briefing video
+    └── *.png          # UI textures
 ```
 
 ## Training flow
@@ -80,7 +77,7 @@ Welcome → Takeoff → Safety Video → Quiz → Emergency Briefing → Emergen
 
 ## Building for standalone Quest (future)
 
-This project currently targets **Windows + Quest Link**. A standalone Android APK would require an additional StereoKit Android build pipeline. See `VR_DEPLOYMENT_GUIDE.md` for the recommended Quest Link workflow.
+This project currently targets **Windows + Quest Link**. A standalone Android APK would require an additional StereoKit Android build pipeline.
 
 ## Large assets
 
