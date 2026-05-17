@@ -46,25 +46,29 @@ class Program
     static Sound? seatbeltChimeSound = null;
     static Sound? alarmSound = null;
     static SoundInst alarmInstance;
+    static Sound? redAlertSiren = null;
+    static SoundInst sirenInstance;
     static float ambientTime = 0f;
     static bool chimePlayed = false;
 
     // Takeoff sequence
     static float takeoffTimer = 0f;
-    static float takeoffDuration = 8f; // seconds of takeoff rumble
+    static float takeoffDuration = 8f;
     static Sound? takeoffRumbleSound = null;
     static SoundInst takeoffRumbleInstance;
     static bool takeoffAnnouncementPlayed = false;
     static float cameraShakeIntensity = 0f;
 
     // Cabin Lighting
-    static Color normalCabinLight = new Color(0.9f, 0.88f, 0.8f); // warm white
-    static Color emergencyCabinLight = new Color(0.15f, 0.05f, 0.02f); // very dim red
+    static Color normalCabinLight = new Color(0.9f, 0.88f, 0.8f);
+    static Color emergencyCabinLight = new Color(0.08f, 0.02f, 0.01f); // very dark
     static Color currentCabinLight;
+    static Material? darkOverlayMaterial = null;
+    static Material? redLightMaterial = null;
 
     // ===== EMERGENCY DRILL SYSTEM =====
     static float emergencyTimer = 0f;
-    static float emergencyTimeLimit = 45f; // seconds to reach exit
+    static float emergencyTimeLimit = 45f;
     static bool drillCompleted = false;
     static float drillCompletionTime = 0f;
 
@@ -76,11 +80,15 @@ class Program
     static List<SmokeParticle> smokeParticles = new List<SmokeParticle>();
     static float smokeSpawnTimer = 0f;
 
+    // Red ceiling lights positions
+    static List<Vec3> redLightPositions = new List<Vec3>();
+
     // Exit doors
     static Vec3 frontExitPosition = new Vec3(0, 0.5f, 8f);
     static Vec3 rearExitPosition = new Vec3(0, 0.5f, -9f);
     static float exitReachDistance = 1.5f;
     static Material? exitGlowMaterial = null;
+    static Material? exitSignMaterial = null;
     static Material? floorStripMaterial = null;
     static Material? smokeMaterial = null;
 
@@ -256,15 +264,11 @@ class Program
             for (int i = 0; i < samples.Length; i++)
             {
                 float t = i / (float)sampleRate;
-                // Deep engine drone with subtle variation
                 float fundamental = (float)Math.Sin(t * 55f * 2 * Math.PI) * 0.25f;
                 float harmonic1 = (float)Math.Sin(t * 110f * 2 * Math.PI) * 0.15f;
                 float harmonic2 = (float)Math.Sin(t * 165f * 2 * Math.PI) * 0.08f;
-                // Subtle modulation for realism
                 float modulation = 1f + (float)Math.Sin(t * 0.3f * 2 * Math.PI) * 0.1f;
-                // Wind noise (filtered noise approximation)
                 float windNoise = (float)(Math.Sin(t * 800 * 2 * Math.PI) * Math.Sin(t * 1.7 * 2 * Math.PI)) * 0.04f;
-
                 samples[i] = (fundamental + harmonic1 + harmonic2 + windNoise) * modulation * 0.5f;
             }
             engineHumSound = Sound.FromSamples(samples);
@@ -280,7 +284,6 @@ class Program
                 float t = i / (float)sampleRate;
                 float envelope = (float)Math.Exp(-t * 3.0);
                 float tone1 = (float)Math.Sin(t * 880f * 2 * Math.PI) * envelope;
-                // Second ding slightly delayed
                 float t2 = t - 0.4f;
                 float tone2 = t2 > 0 ? (float)Math.Sin(t2 * 1047f * 2 * Math.PI) * (float)Math.Exp(-t2 * 3.0) : 0;
                 samples[i] = (tone1 + tone2) * 0.6f;
@@ -297,16 +300,12 @@ class Program
             for (int i = 0; i < samples.Length; i++)
             {
                 float t = i / (float)sampleRate;
-                float intensity = Math.Min(1f, t / 5f); // ramp up over 5 seconds
-                // Deep rumble
+                float intensity = Math.Min(1f, t / 5f);
                 float bass = (float)Math.Sin(t * 40f * 2 * Math.PI) * 0.4f * intensity;
                 float midRumble = (float)Math.Sin(t * 80f * 2 * Math.PI) * 0.25f * intensity;
-                // Turbine whine increasing in pitch
                 float turbinePitch = 200f + intensity * 600f;
                 float turbine = (float)Math.Sin(t * turbinePitch * 2 * Math.PI) * 0.15f * intensity;
-                // Noise component for vibration feel
                 float noise = ((float)rng.NextDouble() * 2 - 1) * 0.1f * intensity;
-
                 samples[i] = Math.Clamp((bass + midRumble + turbine + noise) * 0.7f, -0.95f, 0.95f);
             }
             takeoffRumbleSound = Sound.FromSamples(samples);
@@ -320,26 +319,45 @@ class Program
             for (int i = 0; i < samples.Length; i++)
             {
                 float t = i / (float)sampleRate;
-                // Alternating two-tone alarm
-                float alarmCycle = (float)Math.Sin(t * 2f * 2 * Math.PI); // 2 Hz switching
+                float alarmCycle = (float)Math.Sin(t * 2f * 2 * Math.PI);
                 float freq = alarmCycle > 0 ? 800f : 600f;
                 float tone = (float)Math.Sin(t * freq * 2 * Math.PI) * 0.5f;
-                // Pulsing envelope
                 float pulse = (float)Math.Abs(Math.Sin(t * 3f * 2 * Math.PI));
                 samples[i] = tone * pulse * 0.6f;
             }
             alarmSound = Sound.FromSamples(samples);
         }
 
-        Log.Info("Ambient sounds generated: engine hum, seatbelt chime, takeoff rumble, alarm");
+        // RED ALERT SIREN - aggressive wailing siren that sweeps up and down
+        {
+            int sampleRate = 48000;
+            int duration = 10;
+            float[] samples = new float[sampleRate * duration];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                float t = i / (float)sampleRate;
+                // Siren sweeps between 400Hz and 1200Hz
+                float sirenSweep = (float)Math.Sin(t * 1.5f * 2 * Math.PI); // 1.5 Hz sweep rate
+                float sirenFreq = 800f + sirenSweep * 400f;
+                float siren = (float)Math.Sin(t * sirenFreq * 2 * Math.PI) * 0.6f;
+                // Add harsh harmonics for urgency
+                float harsh = (float)Math.Sin(t * sirenFreq * 3 * 2 * Math.PI) * 0.15f;
+                // Pulsing intensity
+                float pulsing = 0.7f + (float)Math.Abs(Math.Sin(t * 4f * 2 * Math.PI)) * 0.3f;
+                samples[i] = Math.Clamp((siren + harsh) * pulsing * 0.5f, -0.95f, 0.95f);
+            }
+            redAlertSiren = Sound.FromSamples(samples);
+        }
+
+        Log.Info("Ambient sounds generated: engine hum, seatbelt chime, takeoff rumble, alarm, red alert siren");
     }
 
     static void HandleAmbientAtmosphere()
     {
         ambientTime += Time.Stepf;
 
-        // Engine hum - always playing (positioned at wing engines)
-        if (engineHumSound != null && currentState != AppState.EmergencyDrill)
+        // Engine hum - plays during normal states (not during emergency or takeoff)
+        if (engineHumSound != null && currentState != AppState.EmergencyDrill && currentState != AppState.Takeoff)
         {
             if (!engineHumLeft.IsPlaying)
                 engineHumLeft = engineHumSound.Play(new Vec3(-3f, -1f, -2f), 0.3f);
@@ -347,11 +365,11 @@ class Program
                 engineHumRight = engineHumSound.Play(new Vec3(3f, -1f, -2f), 0.3f);
         }
 
-        // Seatbelt chime at specific moments
+        // Seatbelt chime on welcome
         if (!chimePlayed && currentState == AppState.Welcome && ambientTime > 2f)
         {
             if (seatbeltChimeSound != null)
-                seatbeltChimeSound.Play(new Vec3(0, 1.5f, 0), 0.8f); // from overhead
+                seatbeltChimeSound.Play(new Vec3(0, 1.5f, 0), 0.8f);
             chimePlayed = true;
         }
     }
@@ -359,18 +377,61 @@ class Program
     static void HandleCabinLighting()
     {
         // Smoothly transition cabin lighting
-        Color targetLight = currentState == AppState.EmergencyDrill ? emergencyCabinLight : normalCabinLight;
+        Color targetLight = (currentState == AppState.EmergencyDrill || currentState == AppState.EmergencyBriefing)
+            ? emergencyCabinLight : normalCabinLight;
 
-        float lerpSpeed = currentState == AppState.EmergencyDrill ? 1.5f : 0.5f;
+        float lerpSpeed = (currentState == AppState.EmergencyDrill) ? 2.0f : 0.5f;
         currentCabinLight = new Color(
             Lerp(currentCabinLight.r, targetLight.r, Time.Stepf * lerpSpeed),
             Lerp(currentCabinLight.g, targetLight.g, Time.Stepf * lerpSpeed),
             Lerp(currentCabinLight.b, targetLight.b, Time.Stepf * lerpSpeed)
         );
 
-        // Adjust scene lighting to match cabin state
-        // Using Renderer.SkyLight with a uniform color spherical harmonic
+        // Draw darkness overlay during emergency (large dark panels around the cabin)
+        if (currentState == AppState.EmergencyDrill || currentState == AppState.EmergencyBriefing)
+        {
+            if (darkOverlayMaterial != null)
+            {
+                float darkness = 1f - (currentCabinLight.r + currentCabinLight.g + currentCabinLight.b) / 3f;
+                darkOverlayMaterial.SetColor("color", new Color(0, 0, 0, darkness * 0.7f));
+
+                // Dark ceiling
+                Mesh.Quad.Draw(darkOverlayMaterial,
+                    Matrix.TRS(new Vec3(0, 1.8f, 0), Quat.FromAngles(90, 0, 0), new Vec3(4, 20, 1)));
+                // Dark walls
+                Mesh.Quad.Draw(darkOverlayMaterial,
+                    Matrix.TRS(new Vec3(-1.5f, 0, 0), Quat.FromAngles(0, 90, 0), new Vec3(20, 4, 1)));
+                Mesh.Quad.Draw(darkOverlayMaterial,
+                    Matrix.TRS(new Vec3(1.5f, 0, 0), Quat.FromAngles(0, -90, 0), new Vec3(20, 4, 1)));
+            }
+
+            // Draw FLASHING RED CEILING LIGHTS
+            DrawRedAlertLights();
+        }
+
         Renderer.EnableSky = true;
+    }
+
+    static void DrawRedAlertLights()
+    {
+        if (redLightMaterial == null) return;
+
+        // Flash at 2Hz (on/off every 0.25 seconds)
+        float flashPhase = (float)Math.Sin(emergencyTimer * 4f * Math.PI);
+        bool lightOn = flashPhase > 0;
+
+        if (lightOn)
+        {
+            float intensity = 0.6f + flashPhase * 0.4f;
+            redLightMaterial.SetColor("color", new Color(intensity, 0, 0, 0.9f));
+
+            foreach (Vec3 lightPos in redLightPositions)
+            {
+                // Red light panel on ceiling
+                Mesh.Cube.Draw(redLightMaterial,
+                    Matrix.TRS(lightPos, Quat.Identity, new Vec3(0.3f, 0.05f, 0.3f)));
+            }
+        }
     }
 
     static float Lerp(float a, float b, float t)
@@ -389,11 +450,20 @@ class Program
         if (!takeoffAnnouncementPlayed)
         {
             takeoffAnnouncementPlayed = true;
+
+            // STOP background music immediately
+            if (musicInstance.IsPlaying) musicInstance.Stop();
+            // Stop engine hum during takeoff (rumble replaces it)
+            if (engineHumLeft.IsPlaying) engineHumLeft.Stop();
+            if (engineHumRight.IsPlaying) engineHumRight.Stop();
+
             if (tts != null)
             {
                 try
                 {
-                    tts.SpeakAsync("Cabin crew, prepare for takeoff. Ladies and gentlemen, please ensure your seatbelts are fastened and your tray tables are stowed.");
+                    // Professional captain voice - slightly slower, calm
+                    tts.Rate = -1;
+                    tts.SpeakAsync("Cabin crew, prepare for takeoff. Ladies and gentlemen, please ensure your seatbelts are fastened and your tray tables are in their upright and locked position.");
                 }
                 catch (Exception ex) { Log.Warn($"TTS takeoff announcement failed: {ex.Message}"); }
             }
@@ -407,12 +477,12 @@ class Program
                 seatbeltChimeSound.Play(new Vec3(0, 1.5f, 0), 0.9f);
         }
 
-        // Gentle vibration during takeoff (smooth sine-based, not jerky)
+        // Gentle vibration during takeoff
         float progress = takeoffTimer / takeoffDuration;
         if (progress < 0.7f)
-            cameraShakeIntensity = progress * 0.012f; // gentle increasing vibration
+            cameraShakeIntensity = progress * 0.012f;
         else
-            cameraShakeIntensity = (1f - progress) * 0.012f; // settling down smoothly
+            cameraShakeIntensity = (1f - progress) * 0.012f;
 
         // Show takeoff HUD text
         Vec3 textPos = playerPosition + new Vec3(0, 0.2f, -1.2f);
@@ -440,10 +510,14 @@ class Program
                 catch (Exception ex) { Log.Err($"Failed to start video: {ex.Message}"); }
             }
 
-            // Captain announcement for video
+            // Reset TTS rate back to normal before video announcement
             if (tts != null)
             {
-                try { tts.SpeakAsync("We have reached cruising altitude. Please direct your attention to the safety demonstration."); }
+                try
+                {
+                    tts.Rate = -1;
+                    tts.SpeakAsync("We have reached cruising altitude. Please direct your attention to the safety demonstration.");
+                }
                 catch { }
             }
         }
@@ -457,13 +531,24 @@ class Program
         floorStripPositions.Clear();
         for (float z = -8f; z <= 8f; z += 0.8f)
         {
-            floorStripPositions.Add(new Vec3(-0.3f, -1.95f, z)); // left strip
-            floorStripPositions.Add(new Vec3(0.3f, -1.95f, z));  // right strip
+            floorStripPositions.Add(new Vec3(-0.3f, -1.95f, z));
+            floorStripPositions.Add(new Vec3(0.3f, -1.95f, z));
         }
 
-        // Create glowing materials
+        // Build red ceiling light positions
+        redLightPositions.Clear();
+        for (float z = -8f; z <= 8f; z += 2.0f)
+        {
+            redLightPositions.Add(new Vec3(-0.5f, 1.5f, z)); // left ceiling
+            redLightPositions.Add(new Vec3(0.5f, 1.5f, z));  // right ceiling
+        }
+
+        // Create materials
         exitGlowMaterial = Material.Default.Copy();
-        exitGlowMaterial.SetColor("color", new Color(0, 1f, 0, 0.8f)); // bright green
+        exitGlowMaterial.SetColor("color", new Color(0, 1f, 0, 0.8f));
+
+        exitSignMaterial = Material.Unlit.Copy();
+        exitSignMaterial.SetColor("color", new Color(0, 1f, 0, 1f));
 
         floorStripMaterial = Material.Default.Copy();
         floorStripMaterial.SetColor("color", new Color(0, 0.9f, 0.2f, 0.9f));
@@ -472,61 +557,97 @@ class Program
         smokeMaterial.Transparency = Transparency.Add;
         smokeMaterial.SetColor("color", new Color(0.5f, 0.5f, 0.5f, 0.15f));
 
-        Log.Info($"Emergency system initialized: {floorStripPositions.Count} floor strip lights, 2 exits");
+        darkOverlayMaterial = Material.Unlit.Copy();
+        darkOverlayMaterial.Transparency = Transparency.Blend;
+        darkOverlayMaterial.SetColor("color", new Color(0, 0, 0, 0.7f));
+
+        redLightMaterial = Material.Unlit.Copy();
+        redLightMaterial.SetColor("color", new Color(1, 0, 0, 0.9f));
+
+        Log.Info($"Emergency system initialized: {floorStripPositions.Count} floor strips, {redLightPositions.Count} red lights, 2 exits");
     }
 
     static void ShowEmergencyBriefing()
     {
         emergencyBriefingTimer += Time.Stepf;
 
-        // Play alarm and announcement once
+        // Play announcement once - PANICKED URGENT VOICE
         if (!emergencyBriefingShown)
         {
             emergencyBriefingShown = true;
+
+            // Stop all normal audio
+            if (musicInstance.IsPlaying) musicInstance.Stop();
+            if (engineHumLeft.IsPlaying) engineHumLeft.Stop();
+            if (engineHumRight.IsPlaying) engineHumRight.Stop();
+
+            // Play seatbelt chime urgently
             if (seatbeltChimeSound != null)
+            {
                 seatbeltChimeSound.Play(new Vec3(0, 1.5f, 0), 1.0f);
+            }
+
+            // Start red alert siren immediately
+            if (redAlertSiren != null)
+                sirenInstance = redAlertSiren.Play(new Vec3(0, 1.0f, 0), 0.6f);
 
             if (tts != null)
             {
                 try
                 {
-                    tts.SpeakAsync("Attention passengers. This is an emergency drill. " +
-                        "Cabin pressure has been lost. Please locate your nearest emergency exit. " +
-                        "Stay low, follow the illuminated floor strip, and proceed to the nearest exit. " +
-                        "You have 45 seconds. Go!");
+                    // PANICKED URGENT VOICE - fast rate, high volume
+                    tts.Rate = 4; // fast speech
+                    tts.Volume = 100;
+                    tts.SpeakAsync("ATTENTION! ATTENTION! This is an emergency! " +
+                        "Cabin pressure has been lost! " +
+                        "Locate your nearest emergency exit NOW! " +
+                        "Stay low! Follow the floor lights! Move quickly! " +
+                        "You have 45 seconds! GO GO GO!");
                 }
                 catch { }
             }
         }
 
-        // Show briefing UI
-        Pose briefPose = new Pose(new Vec3(0, -0.8f, -2.0f), Quat.LookDir(0, 0, 1));
-        UI.WindowBegin("Emergency Drill", ref briefPose, new Vec2(55, 35) * U.cm);
+        // Keep siren looping
+        if (redAlertSiren != null && !sirenInstance.IsPlaying)
+            sirenInstance = redAlertSiren.Play(new Vec3(0, 1.0f, 0), 0.5f);
 
-        UI.PushTint(new Color(1f, 0.2f, 0.2f));
-        UI.Text("⚠ EMERGENCY DRILL ⚠", TextAlign.Center);
+        // Show briefing UI - DRAGGABLE window (UIWin.Normal allows hand interaction)
+        Pose briefPose = new Pose(new Vec3(0, -0.8f, -2.0f), Quat.LookDir(0, 0, 1));
+        UI.WindowBegin("  !! EMERGENCY DRILL !!  ", ref briefPose, new Vec2(55, 38) * U.cm, UIWin.Normal);
+
+        UI.PushTint(new Color(1f, 0.1f, 0.1f));
+        UI.Text("!!! EMERGENCY !!!", TextAlign.Center);
         UI.PopTint();
         UI.HSeparator();
-        UI.Text("Scenario: Cabin depressurization!", TextAlign.Center);
+
+        UI.PushTint(new Color(1f, 0.4f, 0.1f));
+        UI.Text("SCENARIO: Cabin depressurization!", TextAlign.Center);
+        UI.PopTint();
+
         UI.Text("", TextAlign.Center);
-        UI.Text("Your objectives:", TextAlign.TopLeft);
-        UI.Text("• Stay LOW (smoke rises!)", TextAlign.TopLeft);
-        UI.Text("• Follow the GREEN floor strip lights", TextAlign.TopLeft);
-        UI.Text("• Reach the nearest EXIT within 45 seconds", TextAlign.TopLeft);
+        UI.Text("YOUR MISSION:", TextAlign.TopLeft);
+        UI.Text("  >> Stay LOW - smoke rises!", TextAlign.TopLeft);
+        UI.Text("  >> Follow GREEN floor lights", TextAlign.TopLeft);
+        UI.Text("  >> Reach an EXIT in 45 seconds", TextAlign.TopLeft);
         UI.Text("", TextAlign.Center);
-        UI.Text("Exits are at the FRONT and REAR of the cabin.", TextAlign.Center);
+
+        UI.PushTint(new Color(0, 1f, 0));
+        UI.Text("Exits: FRONT and REAR of cabin", TextAlign.Center);
+        UI.PopTint();
+
         UI.HSeparator();
 
-        UI.PushTint(new Color(0, 0.8f, 0));
-        if (UI.Button("BEGIN DRILL", new Vec2(40, 0) * U.cm))
+        UI.PushTint(new Color(0, 0.9f, 0));
+        if (UI.Button(">> BEGIN DRILL <<", new Vec2(45, 0) * U.cm))
         {
             currentState = AppState.EmergencyDrill;
             emergencyTimer = 0f;
             drillCompleted = false;
 
-            // Start alarm
+            // Start alarm on top of siren
             if (alarmSound != null)
-                alarmInstance = alarmSound.Play(new Vec3(0, 1.0f, 0), 0.5f);
+                alarmInstance = alarmSound.Play(new Vec3(0, 1.0f, 0), 0.4f);
         }
         UI.PopTint();
 
@@ -540,17 +661,25 @@ class Program
         emergencyTimer += Time.Stepf;
         stripPulseTime += Time.Stepf;
 
-        // Draw emergency floor strip lights (pulsing green)
+        // Draw emergency floor strip lights
         DrawFloorStrips();
 
         // Draw smoke particles
         UpdateAndDrawSmoke();
 
-        // Draw exit markers
+        // Draw exit markers with EXIT text
         DrawExitMarkers();
 
         // Show emergency HUD
         DrawEmergencyHUD();
+
+        // Keep red alert siren looping
+        if (redAlertSiren != null && !sirenInstance.IsPlaying && !drillCompleted)
+            sirenInstance = redAlertSiren.Play(new Vec3(0, 1.0f, 0), 0.5f);
+
+        // Keep alarm looping
+        if (alarmSound != null && !alarmInstance.IsPlaying && !drillCompleted)
+            alarmInstance = alarmSound.Play(new Vec3(0, 1.0f, 0), 0.3f);
 
         // Check if player reached an exit
         float distToFront = Vec3.Distance(playerPosition, frontExitPosition);
@@ -559,55 +688,60 @@ class Program
 
         if (nearestExitDist <= exitReachDistance)
         {
-            // Drill completed successfully!
             drillCompleted = true;
             drillCompletionTime = emergencyTimer;
-            if (alarmInstance.IsPlaying) alarmInstance.Stop();
+            StopEmergencySounds();
             currentState = AppState.Finished;
 
             if (tts != null)
             {
-                try { tts.SpeakAsync("Well done! You have successfully reached the emergency exit. Drill complete."); }
+                try
+                {
+                    tts.Rate = 0; // back to normal
+                    tts.SpeakAsync("Well done! You have successfully reached the emergency exit. Drill complete.");
+                }
                 catch { }
             }
         }
         else if (emergencyTimer >= emergencyTimeLimit)
         {
-            // Time's up!
             drillCompleted = true;
             drillCompletionTime = emergencyTimeLimit;
-            if (alarmInstance.IsPlaying) alarmInstance.Stop();
+            StopEmergencySounds();
             currentState = AppState.Finished;
 
             if (tts != null)
             {
-                try { tts.SpeakAsync("Time is up. In a real emergency, every second counts. Please review emergency exit locations."); }
+                try
+                {
+                    tts.Rate = 0;
+                    tts.SpeakAsync("Time is up. In a real emergency, every second counts. Please review emergency exit locations.");
+                }
                 catch { }
             }
         }
+    }
 
-        // Keep alarm looping
-        if (alarmSound != null && !alarmInstance.IsPlaying && !drillCompleted)
-            alarmInstance = alarmSound.Play(new Vec3(0, 1.0f, 0), 0.4f);
+    static void StopEmergencySounds()
+    {
+        if (alarmInstance.IsPlaying) alarmInstance.Stop();
+        if (sirenInstance.IsPlaying) sirenInstance.Stop();
     }
 
     static void DrawFloorStrips()
     {
         if (floorStripMaterial == null) return;
 
-        float pulse = ((float)Math.Sin(stripPulseTime * 4f) + 1f) * 0.5f; // 0 to 1, pulsing
+        float pulse = ((float)Math.Sin(stripPulseTime * 4f) + 1f) * 0.5f;
         float brightness = 0.5f + pulse * 0.5f;
 
-        // Directional flow effect - lights chase toward nearest exit
         for (int i = 0; i < floorStripPositions.Count; i++)
         {
             Vec3 pos = floorStripPositions[i];
-
-            // Wave pattern flowing toward exits
             float flowPhase = (pos.z * 0.5f + stripPulseTime * 3f) % (2f * (float)Math.PI);
             float flowBrightness = ((float)Math.Sin(flowPhase) + 1f) * 0.5f;
-
             float finalBrightness = brightness * (0.5f + flowBrightness * 0.5f);
+
             Color stripColor = new Color(0, finalBrightness * 0.9f, finalBrightness * 0.2f, finalBrightness);
             floorStripMaterial.SetColor("color", stripColor);
 
@@ -620,134 +754,7 @@ class Program
     {
         if (smokeMaterial == null) return;
 
-        // Spawn new smoke particles
         smokeSpawnTimer += Time.Stepf;
-        if (smokeSpawnTimer > 0.15f) // spawn every 150ms
+        if (smokeSpawnTimer > 0.15f)
         {
-            smokeSpawnTimer = 0f;
-            Random rng = new Random();
-            float x = (float)(rng.NextDouble() * 2.4 - 1.2); // cabin width
-            float z = (float)(rng.NextDouble() * 16 - 8);    // cabin length
-            smokeParticles.Add(new SmokeParticle
-            {
-                Position = new Vec3(x, -0.5f, z), // starts at mid-height (smoke accumulating)
-                Velocity = new Vec3(
-                    (float)(rng.NextDouble() * 0.2 - 0.1),
-                    (float)(rng.NextDouble() * 0.3 + 0.1), // rises
-                    (float)(rng.NextDouble() * 0.2 - 0.1)),
-                Life = 0f,
-                MaxLife = (float)(rng.NextDouble() * 4 + 3),
-                Size = (float)(rng.NextDouble() * 0.2 + 0.1)
-            });
-        }
-
-        // Update and draw existing particles
-        for (int i = smokeParticles.Count - 1; i >= 0; i--)
-        {
-            var p = smokeParticles[i];
-            p.Life += Time.Stepf;
-            p.Position += p.Velocity * Time.Stepf;
-            p.Size += Time.Stepf * 0.05f; // slowly expand
-            smokeParticles[i] = p;
-
-            if (p.Life >= p.MaxLife)
-            {
-                smokeParticles.RemoveAt(i);
-                continue;
-            }
-
-            float alpha = 1f - (p.Life / p.MaxLife);
-            alpha *= 0.12f; // keep it subtle
-            smokeMaterial.SetColor("color", new Color(0.6f, 0.6f, 0.6f, alpha));
-            Mesh.Cube.Draw(smokeMaterial,
-                Matrix.TRS(p.Position, Quat.Identity, Vec3.One * p.Size));
-        }
-
-        // Cap particle count
-        while (smokeParticles.Count > 200)
-            smokeParticles.RemoveAt(0);
-    }
-
-    static void DrawExitMarkers()
-    {
-        if (exitGlowMaterial == null) return;
-
-        float exitPulse = ((float)Math.Sin(stripPulseTime * 5f) + 1f) * 0.5f;
-        Color exitColor = new Color(0, 0.5f + exitPulse * 0.5f, 0, 0.9f);
-        exitGlowMaterial.SetColor("color", exitColor);
-
-        // Front exit door marker
-        Mesh.Cube.Draw(exitGlowMaterial,
-            Matrix.TRS(frontExitPosition, Quat.Identity, new Vec3(1.2f, 2f, 0.1f)));
-        Text.Add("EXIT →", Matrix.T(frontExitPosition + new Vec3(0, 1.2f, -0.1f)),
-            Text.MakeStyle(Font.Default, 4f * U.cm, new Color(0, 1, 0)));
-
-        // Rear exit door marker
-        Mesh.Cube.Draw(exitGlowMaterial,
-            Matrix.TRS(rearExitPosition, Quat.Identity, new Vec3(1.2f, 2f, 0.1f)));
-        Text.Add("← EXIT", Matrix.T(rearExitPosition + new Vec3(0, 1.2f, 0.1f)),
-            Text.MakeStyle(Font.Default, 4f * U.cm, new Color(0, 1, 0)));
-    }
-
-    static void DrawEmergencyHUD()
-    {
-        // Timer display (floating near player)
-        float timeRemaining = emergencyTimeLimit - emergencyTimer;
-        Color timerColor = timeRemaining > 15f ? new Color(1, 1, 1) :
-                          timeRemaining > 5f ? new Color(1, 0.7f, 0) :
-                          new Color(1, 0, 0);
-
-        Vec3 hudPos = playerPosition + new Vec3(0, 0.35f, -0.8f);
-        string timerText = $"TIME: {timeRemaining:F1}s";
-        Text.Add(timerText, Matrix.T(hudPos), Text.MakeStyle(Font.Default, 3f * U.cm, timerColor));
-
-        // Distance to nearest exit
-        float distToFront = Vec3.Distance(playerPosition, frontExitPosition);
-        float distToRear = Vec3.Distance(playerPosition, rearExitPosition);
-        string nearestDir = distToFront < distToRear ? "FRONT" : "REAR";
-        float nearestDist = Math.Min(distToFront, distToRear);
-
-        Vec3 distPos = hudPos + new Vec3(0, -0.06f, 0);
-        Text.Add($"Nearest exit: {nearestDir} ({nearestDist:F1}m)",
-            Matrix.T(distPos), Text.MakeStyle(Font.Default, 2f * U.cm, new Color(0, 1, 0)));
-
-        // Crouch reminder if player is standing
-        if (playerHeight > 1.0f)
-        {
-            Vec3 warnPos = distPos + new Vec3(0, -0.06f, 0);
-            Text.Add("⚠ GET LOW! Smoke rises!",
-                Matrix.T(warnPos), Text.MakeStyle(Font.Default, 2.5f * U.cm, new Color(1, 0.3f, 0)));
-        }
-    }
-
-    // ===== ORIGINAL SYSTEMS (ENHANCED) =====
-
-    static void InitializeTTS()
-    {
-        try
-        {
-            tts = new SpeechSynthesizer();
-            try { tts.SetOutputToDefaultAudioDevice(); }
-            catch (Exception ex) { Log.Warn($"Could not set TTS output device: {ex.Message}"); }
-            try { tts.SelectVoiceByHints(VoiceGender.Female); }
-            catch { Log.Warn("Female voice not available, using default"); }
-            tts.Volume = 100;
-            tts.Rate = 0;
-            Log.Info("TTS initialized successfully");
-        }
-        catch (Exception ex)
-        {
-            Log.Err($"TTS initialization failed: {ex.Message}");
-        }
-    }
-
-    static int FindVRWaveOutDeviceNumber()
-    {
-        try
-        {
-            int vrDeviceNumber = -1;
-            for (int i = 0; i < WaveOut.DeviceCount; i++)
-            {
-                var caps = WaveOut.GetCapabilities(i);
-                string name = caps.ProductName.ToLower();
-                if (name.
+            smokeSpawn
