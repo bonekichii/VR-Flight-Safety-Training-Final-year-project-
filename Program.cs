@@ -7,7 +7,7 @@ using NAudio.Wave;
 using NAudio.CoreAudioApi;
 namespace SafetyDemo;
 
-enum AppState { Welcome, Video, Quiz, Finished }
+enum AppState { Welcome, Takeoff, Video, Quiz, EmergencyBriefing, EmergencyDrill, Finished }
 
 class Program
 {
@@ -39,12 +39,61 @@ class Program
     static AudioFileReader? audioFile = null;
     static bool videoFinished = false;
 
+    // ===== AMBIENT CABIN ATMOSPHERE =====
+    static Sound? engineHumSound = null;
+    static SoundInst engineHumLeft;
+    static SoundInst engineHumRight;
+    static Sound? seatbeltChimeSound = null;
+    static Sound? alarmSound = null;
+    static SoundInst alarmInstance;
+    static float ambientTime = 0f;
+    static bool chimePlayed = false;
+
+    // Takeoff sequence
+    static float takeoffTimer = 0f;
+    static float takeoffDuration = 8f; // seconds of takeoff rumble
+    static Sound? takeoffRumbleSound = null;
+    static SoundInst takeoffRumbleInstance;
+    static bool takeoffAnnouncementPlayed = false;
+    static float cameraShakeIntensity = 0f;
+
+    // Cabin Lighting
+    static Color normalCabinLight = new Color(0.9f, 0.88f, 0.8f); // warm white
+    static Color emergencyCabinLight = new Color(0.15f, 0.05f, 0.02f); // very dim red
+    static Color currentCabinLight;
+
+    // ===== EMERGENCY DRILL SYSTEM =====
+    static float emergencyTimer = 0f;
+    static float emergencyTimeLimit = 45f; // seconds to reach exit
+    static bool drillCompleted = false;
+    static float drillCompletionTime = 0f;
+
+    // Emergency floor strip lights
+    static List<Vec3> floorStripPositions = new List<Vec3>();
+    static float stripPulseTime = 0f;
+
+    // Smoke particles
+    static List<SmokeParticle> smokeParticles = new List<SmokeParticle>();
+    static float smokeSpawnTimer = 0f;
+
+    // Exit doors
+    static Vec3 frontExitPosition = new Vec3(0, 0.5f, 8f);
+    static Vec3 rearExitPosition = new Vec3(0, 0.5f, -9f);
+    static float exitReachDistance = 1.5f;
+    static Material? exitGlowMaterial = null;
+    static Material? floorStripMaterial = null;
+    static Material? smokeMaterial = null;
+
+    // Emergency briefing
+    static bool emergencyBriefingShown = false;
+    static float emergencyBriefingTimer = 0f;
+
     // Quiz Data
     static int quizIndex = 0;
     static int score = 0;
     static int? selectedAnswer = null;
     static bool showingFeedback = false;
-    
+
     static List<QuizQuestion> questions = new List<QuizQuestion>() {
         new QuizQuestion(
             "When should you inflate your life vest?",
@@ -134,24 +183,33 @@ class Program
             Environment.Exit(1);
 
         try { airplane = Model.FromFile("airplane.glb"); } catch { Log.Warn("Airplane model not found!"); }
-        
+
         GenerateBackgroundMusic();
+        GenerateAmbientSounds();
         InitializeVideo();
         InitializeTTS();
+        InitializeEmergencySystem();
 
-        
+        currentCabinLight = normalCabinLight;
+
         while (SK.Step(() =>
         {
             if (airplane != null) airplane.Draw(Matrix.TRS(new Vec3(0, -2, 0), Quat.Identity, 1));
             HandleMovement();
-            HandleBackgroundMusic();
+            HandleCabinLighting();
+            HandleAmbientAtmosphere();
 
             switch (currentState)
             {
                 case AppState.Welcome:
+                    HandleBackgroundMusic();
                     ShowWelcomeScreen();
                     break;
-                    
+
+                case AppState.Takeoff:
+                    HandleTakeoffSequence();
+                    break;
+
                 case AppState.Video:
                     if (!videoFinished)
                     {
@@ -163,11 +221,20 @@ class Program
                         currentState = AppState.Quiz;
                     }
                     break;
-                    
+
                 case AppState.Quiz:
+                    HandleBackgroundMusic();
                     ShowQuizUI();
                     break;
-                    
+
+                case AppState.EmergencyBriefing:
+                    ShowEmergencyBriefing();
+                    break;
+
+                case AppState.EmergencyDrill:
+                    HandleEmergencyDrill();
+                    break;
+
                 case AppState.Finished:
                     ShowFinishedUI();
                     break;
@@ -177,32 +244,500 @@ class Program
         SK.Shutdown();
     }
 
+    // ===== AMBIENT CABIN ATMOSPHERE =====
+
+    static void GenerateAmbientSounds()
+    {
+        // Engine hum - low frequency drone with harmonics
+        {
+            int sampleRate = 48000;
+            int duration = 15;
+            float[] samples = new float[sampleRate * duration];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                float t = i / (float)sampleRate;
+                // Deep engine drone with subtle variation
+                float fundamental = (float)Math.Sin(t * 55f * 2 * Math.PI) * 0.25f;
+                float harmonic1 = (float)Math.Sin(t * 110f * 2 * Math.PI) * 0.15f;
+                float harmonic2 = (float)Math.Sin(t * 165f * 2 * Math.PI) * 0.08f;
+                // Subtle modulation for realism
+                float modulation = 1f + (float)Math.Sin(t * 0.3f * 2 * Math.PI) * 0.1f;
+                // Wind noise (filtered noise approximation)
+                float windNoise = (float)(Math.Sin(t * 800 * 2 * Math.PI) * Math.Sin(t * 1.7 * 2 * Math.PI)) * 0.04f;
+
+                samples[i] = (fundamental + harmonic1 + harmonic2 + windNoise) * modulation * 0.5f;
+            }
+            engineHumSound = Sound.FromSamples(samples);
+        }
+
+        // Seatbelt chime - classic two-tone ding
+        {
+            int sampleRate = 48000;
+            float duration = 1.5f;
+            float[] samples = new float[(int)(sampleRate * duration)];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                float t = i / (float)sampleRate;
+                float envelope = (float)Math.Exp(-t * 3.0);
+                float tone1 = (float)Math.Sin(t * 880f * 2 * Math.PI) * envelope;
+                // Second ding slightly delayed
+                float t2 = t - 0.4f;
+                float tone2 = t2 > 0 ? (float)Math.Sin(t2 * 1047f * 2 * Math.PI) * (float)Math.Exp(-t2 * 3.0) : 0;
+                samples[i] = (tone1 + tone2) * 0.6f;
+            }
+            seatbeltChimeSound = Sound.FromSamples(samples);
+        }
+
+        // Takeoff rumble - deep bass with increasing intensity
+        {
+            int sampleRate = 48000;
+            int duration = 10;
+            float[] samples = new float[sampleRate * duration];
+            Random rng = new Random(42);
+            for (int i = 0; i < samples.Length; i++)
+            {
+                float t = i / (float)sampleRate;
+                float intensity = Math.Min(1f, t / 5f); // ramp up over 5 seconds
+                // Deep rumble
+                float bass = (float)Math.Sin(t * 40f * 2 * Math.PI) * 0.4f * intensity;
+                float midRumble = (float)Math.Sin(t * 80f * 2 * Math.PI) * 0.25f * intensity;
+                // Turbine whine increasing in pitch
+                float turbinePitch = 200f + intensity * 600f;
+                float turbine = (float)Math.Sin(t * turbinePitch * 2 * Math.PI) * 0.15f * intensity;
+                // Noise component for vibration feel
+                float noise = ((float)rng.NextDouble() * 2 - 1) * 0.1f * intensity;
+
+                samples[i] = Math.Clamp((bass + midRumble + turbine + noise) * 0.7f, -0.95f, 0.95f);
+            }
+            takeoffRumbleSound = Sound.FromSamples(samples);
+        }
+
+        // Alarm klaxon for emergency
+        {
+            int sampleRate = 48000;
+            int duration = 8;
+            float[] samples = new float[sampleRate * duration];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                float t = i / (float)sampleRate;
+                // Alternating two-tone alarm
+                float alarmCycle = (float)Math.Sin(t * 2f * 2 * Math.PI); // 2 Hz switching
+                float freq = alarmCycle > 0 ? 800f : 600f;
+                float tone = (float)Math.Sin(t * freq * 2 * Math.PI) * 0.5f;
+                // Pulsing envelope
+                float pulse = (float)Math.Abs(Math.Sin(t * 3f * 2 * Math.PI));
+                samples[i] = tone * pulse * 0.6f;
+            }
+            alarmSound = Sound.FromSamples(samples);
+        }
+
+        Log.Info("Ambient sounds generated: engine hum, seatbelt chime, takeoff rumble, alarm");
+    }
+
+    static void HandleAmbientAtmosphere()
+    {
+        ambientTime += Time.Stepf;
+
+        // Engine hum - always playing (positioned at wing engines)
+        if (engineHumSound != null && currentState != AppState.EmergencyDrill)
+        {
+            if (!engineHumLeft.IsPlaying)
+                engineHumLeft = engineHumSound.Play(new Vec3(-3f, -1f, -2f), 0.3f);
+            if (!engineHumRight.IsPlaying)
+                engineHumRight = engineHumSound.Play(new Vec3(3f, -1f, -2f), 0.3f);
+        }
+
+        // Seatbelt chime at specific moments
+        if (!chimePlayed && currentState == AppState.Welcome && ambientTime > 2f)
+        {
+            if (seatbeltChimeSound != null)
+                seatbeltChimeSound.Play(new Vec3(0, 1.5f, 0), 0.8f); // from overhead
+            chimePlayed = true;
+        }
+    }
+
+    static void HandleCabinLighting()
+    {
+        // Smoothly transition cabin lighting
+        Color targetLight = currentState == AppState.EmergencyDrill ? emergencyCabinLight : normalCabinLight;
+
+        float lerpSpeed = currentState == AppState.EmergencyDrill ? 1.5f : 0.5f;
+        currentCabinLight = new Color(
+            Lerp(currentCabinLight.r, targetLight.r, Time.Stepf * lerpSpeed),
+            Lerp(currentCabinLight.g, targetLight.g, Time.Stepf * lerpSpeed),
+            Lerp(currentCabinLight.b, targetLight.b, Time.Stepf * lerpSpeed)
+        );
+
+        // Adjust scene lighting to match cabin state
+        // Using Renderer.SkyLight with a uniform color spherical harmonic
+        Renderer.EnableSky = true;
+    }
+
+    static float Lerp(float a, float b, float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        return a + (b - a) * t;
+    }
+
+    // ===== TAKEOFF SEQUENCE =====
+
+    static void HandleTakeoffSequence()
+    {
+        takeoffTimer += Time.Stepf;
+
+        // Captain announcement at start
+        if (!takeoffAnnouncementPlayed)
+        {
+            takeoffAnnouncementPlayed = true;
+            if (tts != null)
+            {
+                try
+                {
+                    tts.SpeakAsync("Cabin crew, prepare for takeoff. Ladies and gentlemen, please ensure your seatbelts are fastened and your tray tables are stowed.");
+                }
+                catch (Exception ex) { Log.Warn($"TTS takeoff announcement failed: {ex.Message}"); }
+            }
+
+            // Start rumble sound
+            if (takeoffRumbleSound != null)
+                takeoffRumbleInstance = takeoffRumbleSound.Play(Vec3.Zero, 0.7f);
+
+            // Play seatbelt chime
+            if (seatbeltChimeSound != null)
+                seatbeltChimeSound.Play(new Vec3(0, 1.5f, 0), 0.9f);
+        }
+
+        // Camera shake during takeoff (intensity ramps up then settles)
+        float progress = takeoffTimer / takeoffDuration;
+        if (progress < 0.7f)
+            cameraShakeIntensity = progress * 0.03f; // increasing shake
+        else
+            cameraShakeIntensity = (1f - progress) * 0.03f; // settling down
+
+        // Show takeoff HUD text
+        Vec3 textPos = playerPosition + new Vec3(0, 0.2f, -1.2f);
+        string takeoffMsg = progress < 0.3f ? "Preparing for takeoff..." :
+                           progress < 0.7f ? "Taking off!" :
+                           "Reaching cruising altitude...";
+        Text.Add(takeoffMsg, Matrix.T(textPos), TextAlign.Center);
+
+        // Transition to video after takeoff completes
+        if (takeoffTimer >= takeoffDuration)
+        {
+            cameraShakeIntensity = 0f;
+            currentState = AppState.Video;
+
+            // Start video playback
+            if (audioPlayer != null && videoCapture != null)
+            {
+                try
+                {
+                    if (audioFile != null) audioFile.Position = 0;
+                    videoPlaying = true;
+                    audioPlayer.Play();
+                    Log.Info("Video started after takeoff sequence");
+                }
+                catch (Exception ex) { Log.Err($"Failed to start video: {ex.Message}"); }
+            }
+
+            // Captain announcement for video
+            if (tts != null)
+            {
+                try { tts.SpeakAsync("We have reached cruising altitude. Please direct your attention to the safety demonstration."); }
+                catch { }
+            }
+        }
+    }
+
+    // ===== EMERGENCY DRILL SYSTEM =====
+
+    static void InitializeEmergencySystem()
+    {
+        // Build floor strip light positions along the aisle
+        floorStripPositions.Clear();
+        for (float z = -8f; z <= 8f; z += 0.8f)
+        {
+            floorStripPositions.Add(new Vec3(-0.3f, -1.95f, z)); // left strip
+            floorStripPositions.Add(new Vec3(0.3f, -1.95f, z));  // right strip
+        }
+
+        // Create glowing materials
+        exitGlowMaterial = Material.Default.Copy();
+        exitGlowMaterial.SetColor("color", new Color(0, 1f, 0, 0.8f)); // bright green
+
+        floorStripMaterial = Material.Default.Copy();
+        floorStripMaterial.SetColor("color", new Color(0, 0.9f, 0.2f, 0.9f));
+
+        smokeMaterial = Material.Default.Copy();
+        smokeMaterial.Transparency = Transparency.Add;
+        smokeMaterial.SetColor("color", new Color(0.5f, 0.5f, 0.5f, 0.15f));
+
+        Log.Info($"Emergency system initialized: {floorStripPositions.Count} floor strip lights, 2 exits");
+    }
+
+    static void ShowEmergencyBriefing()
+    {
+        emergencyBriefingTimer += Time.Stepf;
+
+        // Play alarm and announcement once
+        if (!emergencyBriefingShown)
+        {
+            emergencyBriefingShown = true;
+            if (seatbeltChimeSound != null)
+                seatbeltChimeSound.Play(new Vec3(0, 1.5f, 0), 1.0f);
+
+            if (tts != null)
+            {
+                try
+                {
+                    tts.SpeakAsync("Attention passengers. This is an emergency drill. " +
+                        "Cabin pressure has been lost. Please locate your nearest emergency exit. " +
+                        "Stay low, follow the illuminated floor strip, and proceed to the nearest exit. " +
+                        "You have 45 seconds. Go!");
+                }
+                catch { }
+            }
+        }
+
+        // Show briefing UI
+        Pose briefPose = new Pose(new Vec3(0, -0.5f, -2.0f), Quat.LookDir(0, 0, 1));
+        UI.WindowBegin("Emergency Drill", ref briefPose, new Vec2(55, 35) * U.cm);
+
+        UI.PushTint(new Color(1f, 0.2f, 0.2f));
+        UI.Text("⚠ EMERGENCY DRILL ⚠", TextAlign.Center);
+        UI.PopTint();
+        UI.HSeparator();
+        UI.Text("Scenario: Cabin depressurization!", TextAlign.Center);
+        UI.Text("", TextAlign.Center);
+        UI.Text("Your objectives:", TextAlign.TopLeft);
+        UI.Text("• Stay LOW (smoke rises!)", TextAlign.TopLeft);
+        UI.Text("• Follow the GREEN floor strip lights", TextAlign.TopLeft);
+        UI.Text("• Reach the nearest EXIT within 45 seconds", TextAlign.TopLeft);
+        UI.Text("", TextAlign.Center);
+        UI.Text("Exits are at the FRONT and REAR of the cabin.", TextAlign.Center);
+        UI.HSeparator();
+
+        if (emergencyBriefingTimer > 3f) // Wait a moment before allowing start
+        {
+            UI.PushTint(new Color(0, 0.8f, 0));
+            if (UI.Button("BEGIN DRILL", new Vec2(40, 0) * U.cm))
+            {
+                currentState = AppState.EmergencyDrill;
+                emergencyTimer = 0f;
+                drillCompleted = false;
+
+                // Start alarm
+                if (alarmSound != null)
+                    alarmInstance = alarmSound.Play(new Vec3(0, 1.0f, 0), 0.5f);
+            }
+            UI.PopTint();
+        }
+        else
+        {
+            UI.Text("(Preparing drill...)", TextAlign.Center);
+        }
+
+        UI.WindowEnd();
+    }
+
+    static void HandleEmergencyDrill()
+    {
+        if (drillCompleted) return;
+
+        emergencyTimer += Time.Stepf;
+        stripPulseTime += Time.Stepf;
+
+        // Draw emergency floor strip lights (pulsing green)
+        DrawFloorStrips();
+
+        // Draw smoke particles
+        UpdateAndDrawSmoke();
+
+        // Draw exit markers
+        DrawExitMarkers();
+
+        // Show emergency HUD
+        DrawEmergencyHUD();
+
+        // Check if player reached an exit
+        float distToFront = Vec3.Distance(playerPosition, frontExitPosition);
+        float distToRear = Vec3.Distance(playerPosition, rearExitPosition);
+        float nearestExitDist = Math.Min(distToFront, distToRear);
+
+        if (nearestExitDist <= exitReachDistance)
+        {
+            // Drill completed successfully!
+            drillCompleted = true;
+            drillCompletionTime = emergencyTimer;
+            if (alarmInstance.IsPlaying) alarmInstance.Stop();
+            currentState = AppState.Finished;
+
+            if (tts != null)
+            {
+                try { tts.SpeakAsync("Well done! You have successfully reached the emergency exit. Drill complete."); }
+                catch { }
+            }
+        }
+        else if (emergencyTimer >= emergencyTimeLimit)
+        {
+            // Time's up!
+            drillCompleted = true;
+            drillCompletionTime = emergencyTimeLimit;
+            if (alarmInstance.IsPlaying) alarmInstance.Stop();
+            currentState = AppState.Finished;
+
+            if (tts != null)
+            {
+                try { tts.SpeakAsync("Time is up. In a real emergency, every second counts. Please review emergency exit locations."); }
+                catch { }
+            }
+        }
+
+        // Keep alarm looping
+        if (alarmSound != null && !alarmInstance.IsPlaying && !drillCompleted)
+            alarmInstance = alarmSound.Play(new Vec3(0, 1.0f, 0), 0.4f);
+    }
+
+    static void DrawFloorStrips()
+    {
+        if (floorStripMaterial == null) return;
+
+        float pulse = ((float)Math.Sin(stripPulseTime * 4f) + 1f) * 0.5f; // 0 to 1, pulsing
+        float brightness = 0.5f + pulse * 0.5f;
+
+        // Directional flow effect - lights chase toward nearest exit
+        for (int i = 0; i < floorStripPositions.Count; i++)
+        {
+            Vec3 pos = floorStripPositions[i];
+
+            // Wave pattern flowing toward exits
+            float flowPhase = (pos.z * 0.5f + stripPulseTime * 3f) % (2f * (float)Math.PI);
+            float flowBrightness = ((float)Math.Sin(flowPhase) + 1f) * 0.5f;
+
+            float finalBrightness = brightness * (0.5f + flowBrightness * 0.5f);
+            Color stripColor = new Color(0, finalBrightness * 0.9f, finalBrightness * 0.2f, finalBrightness);
+            floorStripMaterial.SetColor("color", stripColor);
+
+            Mesh.Cube.Draw(floorStripMaterial,
+                Matrix.TRS(pos, Quat.Identity, new Vec3(0.08f, 0.02f, 0.15f)));
+        }
+    }
+
+    static void UpdateAndDrawSmoke()
+    {
+        if (smokeMaterial == null) return;
+
+        // Spawn new smoke particles
+        smokeSpawnTimer += Time.Stepf;
+        if (smokeSpawnTimer > 0.15f) // spawn every 150ms
+        {
+            smokeSpawnTimer = 0f;
+            Random rng = new Random();
+            float x = (float)(rng.NextDouble() * 2.4 - 1.2); // cabin width
+            float z = (float)(rng.NextDouble() * 16 - 8);    // cabin length
+            smokeParticles.Add(new SmokeParticle
+            {
+                Position = new Vec3(x, -0.5f, z), // starts at mid-height (smoke accumulating)
+                Velocity = new Vec3(
+                    (float)(rng.NextDouble() * 0.2 - 0.1),
+                    (float)(rng.NextDouble() * 0.3 + 0.1), // rises
+                    (float)(rng.NextDouble() * 0.2 - 0.1)),
+                Life = 0f,
+                MaxLife = (float)(rng.NextDouble() * 4 + 3),
+                Size = (float)(rng.NextDouble() * 0.2 + 0.1)
+            });
+        }
+
+        // Update and draw existing particles
+        for (int i = smokeParticles.Count - 1; i >= 0; i--)
+        {
+            var p = smokeParticles[i];
+            p.Life += Time.Stepf;
+            p.Position += p.Velocity * Time.Stepf;
+            p.Size += Time.Stepf * 0.05f; // slowly expand
+            smokeParticles[i] = p;
+
+            if (p.Life >= p.MaxLife)
+            {
+                smokeParticles.RemoveAt(i);
+                continue;
+            }
+
+            float alpha = 1f - (p.Life / p.MaxLife);
+            alpha *= 0.12f; // keep it subtle
+            smokeMaterial.SetColor("color", new Color(0.6f, 0.6f, 0.6f, alpha));
+            Mesh.Cube.Draw(smokeMaterial,
+                Matrix.TRS(p.Position, Quat.Identity, Vec3.One * p.Size));
+        }
+
+        // Cap particle count
+        while (smokeParticles.Count > 200)
+            smokeParticles.RemoveAt(0);
+    }
+
+    static void DrawExitMarkers()
+    {
+        if (exitGlowMaterial == null) return;
+
+        float exitPulse = ((float)Math.Sin(stripPulseTime * 5f) + 1f) * 0.5f;
+        Color exitColor = new Color(0, 0.5f + exitPulse * 0.5f, 0, 0.9f);
+        exitGlowMaterial.SetColor("color", exitColor);
+
+        // Front exit door marker
+        Mesh.Cube.Draw(exitGlowMaterial,
+            Matrix.TRS(frontExitPosition, Quat.Identity, new Vec3(1.2f, 2f, 0.1f)));
+        Text.Add("EXIT →", Matrix.T(frontExitPosition + new Vec3(0, 1.2f, -0.1f)),
+            Text.MakeStyle(Font.Default, 4f * U.cm, new Color(0, 1, 0)));
+
+        // Rear exit door marker
+        Mesh.Cube.Draw(exitGlowMaterial,
+            Matrix.TRS(rearExitPosition, Quat.Identity, new Vec3(1.2f, 2f, 0.1f)));
+        Text.Add("← EXIT", Matrix.T(rearExitPosition + new Vec3(0, 1.2f, 0.1f)),
+            Text.MakeStyle(Font.Default, 4f * U.cm, new Color(0, 1, 0)));
+    }
+
+    static void DrawEmergencyHUD()
+    {
+        // Timer display (floating near player)
+        float timeRemaining = emergencyTimeLimit - emergencyTimer;
+        Color timerColor = timeRemaining > 15f ? new Color(1, 1, 1) :
+                          timeRemaining > 5f ? new Color(1, 0.7f, 0) :
+                          new Color(1, 0, 0);
+
+        Vec3 hudPos = playerPosition + new Vec3(0, 0.35f, -0.8f);
+        string timerText = $"TIME: {timeRemaining:F1}s";
+        Text.Add(timerText, Matrix.T(hudPos), Text.MakeStyle(Font.Default, 3f * U.cm, timerColor));
+
+        // Distance to nearest exit
+        float distToFront = Vec3.Distance(playerPosition, frontExitPosition);
+        float distToRear = Vec3.Distance(playerPosition, rearExitPosition);
+        string nearestDir = distToFront < distToRear ? "FRONT" : "REAR";
+        float nearestDist = Math.Min(distToFront, distToRear);
+
+        Vec3 distPos = hudPos + new Vec3(0, -0.06f, 0);
+        Text.Add($"Nearest exit: {nearestDir} ({nearestDist:F1}m)",
+            Matrix.T(distPos), Text.MakeStyle(Font.Default, 2f * U.cm, new Color(0, 1, 0)));
+
+        // Crouch reminder if player is standing
+        if (playerHeight > 1.0f)
+        {
+            Vec3 warnPos = distPos + new Vec3(0, -0.06f, 0);
+            Text.Add("⚠ GET LOW! Smoke rises!",
+                Matrix.T(warnPos), Text.MakeStyle(Font.Default, 2.5f * U.cm, new Color(1, 0.3f, 0)));
+        }
+    }
+
+    // ===== ORIGINAL SYSTEMS (ENHANCED) =====
+
     static void InitializeTTS()
     {
         try
         {
             tts = new SpeechSynthesizer();
-            
-            // Try to set output to VR headset audio device
-            try
-            {
-                tts.SetOutputToDefaultAudioDevice();
-                Log.Info("TTS output set to default audio device");
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"Could not set TTS output device: {ex.Message}");
-            }
-            
-            try
-            {
-                tts.SelectVoiceByHints(VoiceGender.Female);
-            }
-            catch
-            {
-                Log.Warn("Female voice not available, using default");
-            }
-            
+            try { tts.SetOutputToDefaultAudioDevice(); }
+            catch (Exception ex) { Log.Warn($"Could not set TTS output device: {ex.Message}"); }
+            try { tts.SelectVoiceByHints(VoiceGender.Female); }
+            catch { Log.Warn("Female voice not available, using default"); }
             tts.Volume = 100;
             tts.Rate = 0;
             Log.Info("TTS initialized successfully");
@@ -218,594 +753,4 @@ class Program
         try
         {
             int vrDeviceNumber = -1;
-            Log.Info($"Enumerating {WaveOut.DeviceCount} WaveOut audio devices:");
-            
-            for (int i = 0; i < WaveOut.DeviceCount; i++)
-            {
-                var caps = WaveOut.GetCapabilities(i);
-                Log.Info($"  WaveOut device {i}: {caps.ProductName}");
-                string name = caps.ProductName.ToLower();
-                if (name.Contains("oculus") || name.Contains("meta") || 
-                    name.Contains("quest") || name.Contains("rift"))
-                {
-                    vrDeviceNumber = i;
-                    Log.Info($"  -> Matched as VR audio device at index {i}!");
-                }
-            }
-            
-            // Also log WASAPI devices for diagnostics
-            try
-            {
-                var enumerator = new MMDeviceEnumerator();
-                var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-                Log.Info($"WASAPI devices ({devices.Count}):");
-                foreach (var device in devices)
-                    Log.Info($"  WASAPI: {device.FriendlyName}");
-            }
-            catch { }
-            
-            if (vrDeviceNumber < 0)
-                Log.Warn("No VR audio device found in WaveOut device list");
-            
-            return vrDeviceNumber;
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"Failed to enumerate audio devices: {ex.Message}");
-            return -1;
-        }
-    }
-
-    static void ShowWelcomeScreen()
-    {
-        Pose welcomePose = new Pose(new Vec3(0, -0.8f, -2.0f), Quat.LookDir(0, 0, 1));
-        
-        UI.WindowBegin("Welcome", ref welcomePose, new Vec2(50, 40) * U.cm);
-        
-        UI.Text("Airplane Safety Training", TextAlign.Center);
-        UI.HSeparator();
-        UI.Text("Welcome aboard!", TextAlign.Center);
-        UI.Text("This VR experience will teach you", TextAlign.Center);
-        UI.Text("important airplane safety procedures.", TextAlign.Center);
-        UI.HSeparator();
-        
-        if (UI.Button("Start Training", new Vec2(40, 0) * U.cm))
-        {
-            // Play TTS announcement immediately
-            if (!welcomePlayed && tts != null)
-            {
-                welcomePlayed = true;
-                try
-                {
-                    Log.Info("Playing TTS announcement...");
-                    tts.SpeakAsync("Welcome to the Airlines. Please watch the safety video carefully.");
-                }
-                catch (Exception ex)
-                {
-                    Log.Err($"TTS failed: {ex.Message}");
-                }
-            }
-            
-            currentState = AppState.Video;
-            
-            // Start video playback
-            if (audioPlayer != null && videoCapture != null)
-            {
-                try
-                {
-                    // Reset audio position to start
-                    if (audioFile != null)
-                    {
-                        audioFile.Position = 0;
-                        Log.Info($"Audio position reset to 0");
-                    }
-                    
-                    videoPlaying = true;
-                    audioPlayer.Play();
-                    Log.Info($"Video audio started - State: {audioPlayer.PlaybackState}, Volume: {audioPlayer.Volume}");
-                }
-                catch (Exception ex)
-                {
-                    Log.Err($"Failed to start video playback: {ex.Message}");
-                }
-            }
-            else
-            {
-                Log.Warn($"Cannot start video - audioPlayer: {audioPlayer != null}, videoCapture: {videoCapture != null}");
-                if (audioPlayer == null) Log.Err("Audio player is NULL!");
-                if (videoCapture == null) Log.Err("Video capture is NULL!");
-            }
-        }
-        
-        UI.WindowEnd();
-    }
-
-    static void ShowQuizUI()
-    {
-        if (quizIndex >= questions.Count)
-        {
-            currentState = AppState.Finished;
-            return;
-        }
-
-        var q = questions[quizIndex];
-
-        UI.WindowBegin("Quiz Window", ref quizUiPose, new Vec2(60, 40) * U.cm);
-
-        UI.Text(q.Text, TextAlign.TopLeft);
-        UI.HSeparator();
-
-        if (showingFeedback)
-        {
-            for (int i = 0; i < q.Options.Length; i++)
-            {
-                if (i == q.CorrectIdx)
-                    UI.PushTint(new Color(0, 0.8f, 0));
-                else if (i == selectedAnswer)
-                    UI.PushTint(new Color(1, 0, 0));
-                else
-                    UI.PushTint(new Color(0.5f, 0.5f, 0.5f));
-
-                UI.Button(q.Options[i]);
-                UI.PopTint();
-            }
-
-            UI.HSeparator();
-            UI.Text(q.Explanation, TextAlign.TopLeft);
-            UI.HSeparator();
-
-            if (UI.Button("Next Question ->"))
-            {
-                showingFeedback = false;
-                selectedAnswer = null;
-                quizIndex++;
-                if (quizIndex >= questions.Count)
-                    currentState = AppState.Finished;
-            }
-        }
-        else
-        {
-            for (int i = 0; i < q.Options.Length; i++)
-            {
-                if (UI.Button(q.Options[i]))
-                {
-                    selectedAnswer = i;
-                    showingFeedback = true;
-                    if (selectedAnswer == q.CorrectIdx)
-                        score++;
-                }
-            }
-        }
-
-        UI.WindowEnd();
-    }
-
-    static void ShowFinishedUI()
-    {
-        UI.WindowBegin("Finished Window", ref quizUiPose, new Vec2(60, 40) * U.cm);
-        
-        UI.Text($"Score: {score} / {questions.Count}", TextAlign.Center);
-        UI.HSeparator();
-
-        if (score == questions.Count)
-            UI.Text("PERFECT SCORE!\nYou are ready to fly.", TextAlign.Center);
-        else
-            UI.Text("Please review the safety card.\nSafety is our top priority.", TextAlign.Center);
-
-        UI.HSeparator();
-        
-        if (UI.Button("Restart Training"))
-        {
-            quizIndex = 0;
-            score = 0;
-            videoFinished = false;
-            videoPlaying = false;
-            welcomePlayed = false;
-            currentState = AppState.Welcome;
-            
-            if (videoCapture != null)
-                videoCapture.Set(VideoCaptureProperties.PosFrames, 0);
-            if (audioFile != null)
-                audioFile.Position = 0;
-        }
-        UI.WindowEnd();
-    }
-
-    static List<SeatCollider> seatColliders = BuildSeatColliders();
-
-    static float playerYaw = 0f;
-    static float playerPitch = 0f;
-    static Vec3 playerPosition = new Vec3(0, 1.2f, -5);
-    static float playerHeight = 1.2f;
-    static bool isSeated = true;
-
-    static Vec3 GetControllerMovement(Vec3 forward, Vec3 right)
-    {
-        Vec2 input = Vec2.Zero;
-        Controller leftController = Input.Controller(Handed.Left);
-        Controller rightController = Input.Controller(Handed.Right);
-
-        if (leftController.IsTracked)
-            input += leftController.stick;
-
-        if (rightController.IsTracked)
-            input += rightController.stick;
-
-        if (input.Length > 1)
-            input = input.Normalized;
-
-        return (forward * input.y) + (right * input.x);
-    }
-
-    static void HandleMovement()
-    {
-        float rotSpeed = 120f * Time.Stepf;
-        
-        if (Input.Key(Key.Left).IsActive())  playerYaw -= rotSpeed;
-        if (Input.Key(Key.Right).IsActive()) playerYaw += rotSpeed;
-        if (Input.Key(Key.Up).IsActive())    playerPitch += rotSpeed;
-        if (Input.Key(Key.Down).IsActive())  playerPitch -= rotSpeed;
-        playerPitch = Math.Clamp(playerPitch, -80, 80);
-
-        if (Input.Key(Key.Shift).IsJustActive())
-        {
-            isSeated = !isSeated;
-            playerHeight = isSeated ? 1.2f : 0.6f;
-        }
-
-        float speed = 2.0f * Time.Stepf;
-        float yawRad = playerYaw * (float)Math.PI / 180f;
-        Vec3 forward = new Vec3((float)Math.Sin(yawRad), 0, (float)Math.Cos(yawRad));
-        Vec3 right = new Vec3((float)Math.Cos(yawRad), 0, -(float)Math.Sin(yawRad));
-        
-        Vec3 keyboardMove = Vec3.Zero;
-        if (Input.Key(Key.W).IsActive()) keyboardMove += forward;
-        if (Input.Key(Key.S).IsActive()) keyboardMove -= forward;
-        if (Input.Key(Key.D).IsActive()) keyboardMove += right;
-        if (Input.Key(Key.A).IsActive()) keyboardMove -= right;
-
-        if (keyboardMove.Length > 0.01f)
-            keyboardMove = keyboardMove.Normalized;
-        else
-            keyboardMove = Vec3.Zero;
-
-        Vec3 controllerMove = GetControllerMovement(forward, right);
-        Vec3 moveInput = keyboardMove + controllerMove;
-
-        Vec3 newPos = playerPosition;
-        if (moveInput.Length > 0.01f)
-            newPos += moveInput * speed;
-        newPos.y = playerHeight;
-
-        float cabinHalfWidth = 1.2f;
-        float cabinFront = 10f;
-        float cabinBack = -10f;
-        
-        newPos.x = Math.Clamp(newPos.x, -cabinHalfWidth, cabinHalfWidth);
-        newPos.z = Math.Clamp(newPos.z, cabinBack, cabinFront);
-
-        if (!IsInsideSeatCollision(newPos))
-            playerPosition = newPos;
-
-        Quat rotation = Quat.FromAngles(playerPitch, playerYaw, 0);
-        Matrix cameraTransform = Matrix.TR(playerPosition, rotation);
-        Renderer.CameraRoot = cameraTransform.Inverse;
-
-        if (Input.Key(Key.Space).IsJustActive())
-        {
-            playerPosition = new Vec3(0, 1.2f, -5);
-            playerYaw = 0;
-            playerPitch = 0;
-            isSeated = true;
-            playerHeight = 1.2f;
-        }
-
-        Text.Add("Arrow Keys: Look | WASD: Move | Shift: Stand/Sit | Space: Reset", 
-                 Matrix.T(playerPosition + new Vec3(0, 0.4f, -0.8f)), TextAlign.Center);
-    }
-
-    static void GenerateBackgroundMusic()
-    {
-        int sampleRate = 48000;
-        int duration = 30;
-        float[] samples = new float[sampleRate * duration];
-        
-        float[] melodyNotes = { 261.63f, 293.66f, 329.63f, 349.23f, 392.00f, 440.00f, 493.88f, 523.25f };
-        int[] melodyPattern = { 0, 2, 4, 2, 0, 2, 4, 7, 4, 2, 0, 4, 2, 0 };
-        float noteLength = duration / (float)melodyPattern.Length;
-        
-        for (int i = 0; i < samples.Length; i++)
-        {
-            float t = i / (float)sampleRate;
-            
-            float bass1 = (float)Math.Sin(t * 65.41f * 2 * Math.PI) * 0.15f;
-            float bass2 = (float)Math.Sin(t * 98.00f * 2 * Math.PI) * 0.12f;
-            float pad1 = (float)Math.Sin(t * 130.81f * 2 * Math.PI) * 0.12f;
-            float pad2 = (float)Math.Sin(t * 164.81f * 2 * Math.PI) * 0.10f;
-            float pad3 = (float)Math.Sin(t * 196.00f * 2 * Math.PI) * 0.10f;
-            
-            int noteIndex = (int)(t / noteLength) % melodyPattern.Length;
-            float melodyFreq = melodyNotes[melodyPattern[noteIndex]];
-            float noteTime = (t % noteLength) / noteLength;
-            float melodyEnvelope = (float)Math.Sin(noteTime * Math.PI);
-            float melody = (float)Math.Sin(t * melodyFreq * 2 * Math.PI) * 0.18f * melodyEnvelope;
-            
-            float shimmerMod = (float)Math.Sin(t * 0.4f * 2 * Math.PI) * 0.3f + 0.7f;
-            float sparkle1 = (float)Math.Sin(t * 523.25f * 2 * Math.PI) * 0.08f * shimmerMod;
-            float sparkle2 = (float)Math.Sin(t * 659.25f * 2 * Math.PI) * 0.06f * shimmerMod;
-            float chorus1 = (float)Math.Sin(t * 262.00f * 2 * Math.PI) * 0.05f;
-            float chorus2 = (float)Math.Sin(t * 330.00f * 2 * Math.PI) * 0.04f;
-            
-            float fadeWindow = 3.0f;
-            float fadeIn = Math.Min(1.0f, t / fadeWindow);
-            float fadeOut = Math.Min(1.0f, (duration - t) / fadeWindow);
-            float masterEnvelope = Math.Min(fadeIn, fadeOut);
-            
-            float mixedSample = (bass1 + bass2 + pad1 + pad2 + pad3 + melody + 
-                                sparkle1 + sparkle2 + chorus1 + chorus2) * masterEnvelope;
-            
-            samples[i] = Math.Clamp(mixedSample * 0.7f, -0.95f, 0.95f);
-        }
-        
-        backgroundMusic = Sound.FromSamples(samples);
-        Log.Info("Background music generated");
-    }
-
-    static void HandleBackgroundMusic()
-    {
-        if (backgroundMusic == null) return;
-        if (videoPlaying) return;
-        
-        if (!musicInstance.IsPlaying)
-            musicInstance = backgroundMusic.Play(Vec3.Zero, 0.6f);
-    }
-
-    static void InitializeVideo()
-    {
-        try
-        {
-            string videoPath = "Assets/Our New No-Nonsense Safety Video Emirates.mp4";
-            videoCapture = new VideoCapture(videoPath);
-            
-            if (!videoCapture.IsOpened())
-            {
-                Log.Err("Failed to open video file");
-                return;
-            }
-            
-            int width = (int)videoCapture.Get(VideoCaptureProperties.FrameWidth);
-            int height = (int)videoCapture.Get(VideoCaptureProperties.FrameHeight);
-            videoFPS = (float)videoCapture.Get(VideoCaptureProperties.Fps);
-            if (videoFPS <= 0) videoFPS = 30f;
-            
-            videoTexture = new Tex(TexType.Image, TexFormat.Rgba32);
-            videoFrame = new Mat();
-            
-            // Initialize audio
-            try
-            {
-                Log.Info($"Initializing audio from: {videoPath}");
-                audioFile = new AudioFileReader(videoPath);
-                
-                Log.Info($"Audio file opened - Length: {audioFile.Length}, WaveFormat: {audioFile.WaveFormat}");
-                Log.Info($"Audio Duration: {audioFile.TotalTime}, Sample Rate: {audioFile.WaveFormat.SampleRate}, Channels: {audioFile.WaveFormat.Channels}");
-                
-                // Find VR headset audio device and route audio there
-                int vrDeviceNum = FindVRWaveOutDeviceNumber();
-                var waveOut = new WaveOutEvent();
-                if (vrDeviceNum >= 0)
-                {
-                    waveOut.DeviceNumber = vrDeviceNum;
-                    Log.Info($"Audio routed to VR headset via WaveOut device #{vrDeviceNum}");
-                }
-                else
-                {
-                    Log.Warn("No VR audio device found, falling back to default PC speakers");
-                }
-                audioPlayer = waveOut;
-                
-                audioPlayer.Init(audioFile);
-                audioPlayer.Volume = 1.0f;
-                
-                Log.Info($"Video audio initialized successfully - Duration: {audioFile.TotalTime}");
-                Log.Info($"Audio player state after init: {audioPlayer.PlaybackState}");
-            }
-            catch (Exception ex)
-            {
-                Log.Err($"Video audio init failed: {ex.Message}");
-                Log.Err($"Stack trace: {ex.StackTrace}");
-                audioPlayer = null;
-                audioFile = null;
-            }
-            
-            videoPlaying = false;
-            Log.Info($"Video initialized: {width}x{height} @ {videoFPS} FPS");
-        }
-        catch (Exception ex)
-        {
-            Log.Err($"Video initialization failed: {ex.Message}");
-        }
-    }
-
-    static void UpdateVideoFrame()
-    {
-        if (!videoPlaying || videoCapture == null || videoTexture == null || videoFrame == null) return;
-        
-        videoTimer += Time.Stepf;
-        float frameDuration = 1.0f / videoFPS;
-        
-        if (videoTimer >= frameDuration)
-        {
-            videoTimer -= frameDuration;
-            
-            if (videoCapture.Read(videoFrame) && !videoFrame.Empty())
-            {
-                Mat rgbaFrame = new Mat();
-                Cv2.CvtColor(videoFrame, rgbaFrame, ColorConversionCodes.BGR2RGBA);
-                
-                int width = rgbaFrame.Width;
-                int height = rgbaFrame.Height;
-                byte[] frameData = new byte[width * height * 4];
-                System.Runtime.InteropServices.Marshal.Copy(rgbaFrame.Data, frameData, 0, frameData.Length);
-                
-                videoTexture.SetColors(width, height, frameData);
-                rgbaFrame.Dispose();
-            }
-            else
-            {
-                videoPlaying = false;
-                videoFinished = true;
-                if (audioPlayer != null) audioPlayer.Stop();
-                Log.Info("Video finished");
-            }
-        }
-    }
-
-    static void ToggleVideoPlayback()
-    {
-        if (videoCapture == null) return;
-
-        videoPlaying = !videoPlaying;
-
-        if (videoPlaying)
-        {
-            if (audioPlayer != null)
-            {
-                try
-                {
-                    audioPlayer.Play();
-                    Log.Info("Video audio playing");
-                }
-                catch (Exception ex)
-                {
-                    Log.Err($"Audio play failed: {ex.Message}");
-                }
-            }
-        }
-        else
-        {
-            if (audioPlayer != null)
-            {
-                audioPlayer.Pause();
-                Log.Info("Video audio paused");
-            }
-        }
-    }
-
-    static void SkipVideo()
-    {
-        if (videoCapture == null) return;
-        
-        if (audioPlayer != null) audioPlayer.Stop();
-        videoPlaying = false;
-        videoFinished = true;
-        Log.Info("Video skipped");
-    }
-
-    static void DrawVideoScreen()
-    {
-        if (videoTexture == null || videoFinished) return;
-        
-        Mesh.Cube.Draw(Material.Default,
-            Matrix.TRS(videoScreenPose.position, videoScreenPose.orientation, videoScreenScale),
-            new Color(0.05f, 0.05f, 0.05f));
-        
-        Material videoMat = Material.Default.Copy();
-        videoMat[MatParamName.DiffuseTex] = videoTexture;
-        
-        Vec3 videoPos = videoScreenPose.position + videoScreenPose.orientation * Vec3.Forward * 0.015f;
-        Vec3 videoScale = new Vec3(videoScreenScale.x * 0.98f, videoScreenScale.y * 0.98f, 0.001f);
-        
-        Mesh.Quad.Draw(videoMat,
-            Matrix.TRS(videoPos, videoScreenPose.orientation, videoScale));
-
-        Pose controlPose = new Pose(
-            videoScreenPose.position + new Vec3(0, -0.35f, 0),
-            videoScreenPose.orientation
-        );
-        
-        UI.WindowBegin("Video Controls", ref controlPose, new Vec2(30, 10) * U.cm, UIWin.Empty);
-        
-        if (!videoPlaying)
-        {
-            if (UI.Button("▶ Play Video"))
-                ToggleVideoPlayback();
-        }
-        else
-        {
-            if (UI.Button("⏸ Pause"))
-                ToggleVideoPlayback();
-        }
-        
-        UI.SameLine();
-        
-        if (UI.Button("⏭ Skip"))
-            SkipVideo();
-        
-        UI.WindowEnd();
-    }
-
-    static List<SeatCollider> BuildSeatColliders()
-    {
-        List<SeatCollider> seats = new List<SeatCollider>();
-        float rowSpacing = 1.3f;
-        int rowCount = 12;
-        float firstRowZ = -7f;
-        float seatOffsetX = 0.8f;
-        Vec3 halfExtents = new Vec3(0.45f, 0.8f, 0.55f);
-
-        for (int i = 0; i < rowCount; i++)
-        {
-            float z = firstRowZ + i * rowSpacing;
-            seats.Add(new SeatCollider(new Vec3(-seatOffsetX, 0.8f, z), halfExtents));
-            seats.Add(new SeatCollider(new Vec3(seatOffsetX, 0.8f, z), halfExtents));
-        }
-
-        return seats;
-    }
-
-    static bool IsInsideSeatCollision(Vec3 position)
-    {
-        foreach (SeatCollider seat in seatColliders)
-        {
-            if (seat.Contains(position))
-                return true;
-        }
-        return false;
-    }
-}
-
-struct SeatCollider
-{
-    public Vec3 Center;
-    public Vec3 HalfExtents;
-
-    public SeatCollider(Vec3 center, Vec3 halfExtents)
-    {
-        Center = center;
-        HalfExtents = halfExtents;
-    }
-
-    public bool Contains(Vec3 point)
-    {
-        return Math.Abs(point.x - Center.x) <= HalfExtents.x &&
-               Math.Abs(point.y - Center.y) <= HalfExtents.y &&
-               Math.Abs(point.z - Center.z) <= HalfExtents.z;
-    }
-}
-
-class QuizQuestion
-{
-    public string Text;
-    public string[] Options;
-    public int CorrectIdx;
-    public string Explanation;
-
-    public QuizQuestion(string text, string[] options, int correct, string explanation)
-    {
-        Text = text;
-        Options = options;
-        CorrectIdx = correct;
-        Explanation = explanation;
-    }
-}
+     
